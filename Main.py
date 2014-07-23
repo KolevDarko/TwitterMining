@@ -6,9 +6,10 @@ from urllib.error import URLError
 from http.client import BadStatusLine
 import twitter
 import json
+import io
 from functools import partial
 from sys import maxsize
-import stopwords
+import pymongo
 
 
 
@@ -174,16 +175,12 @@ def get_friends_followers_ids(twitter_api, screen_name=None, user_id=None,
             response = make_twitter_request(twitter_api.friends.ids, count=5000, user_id=user_id, cursor=cursor)
 
         if response is not None:
-
             ids += response['ids']
             cursor = response['next_cursor']
         print(sys.stderr, 'Fetched {0} total {1} ids for {2}'.format(len(ids),label,(user_id or screen_name)))
 
         if len(ids) >= limit or response is None:
             return ids[:friends_limit]
-
-        #Do something useful with the IDS,
-        # return friends_ids[:friends_limit]
         return ids[:friends_limit]
 
 def harvest_user_timeline(twitter_api, screen_name=None, user_id=None, max_results=1000):
@@ -226,36 +223,122 @@ def harvest_user_timeline(twitter_api, screen_name=None, user_id=None, max_resul
     return results[:max_results]
 
 
-auth_twitter_search = partial(twitter_search, twitter_api)
-# results = auth_twitter_search("Android")
-# print(pp(results))
+#Saving json data in text files
+def save_json(filename, data):
+    name = 'resources/{0}.json'.format(filename)
+    f = open(name, 'w+', encoding='utf-8')
+    f.write((json.dumps(data, ensure_ascii=False)))
+    return
 
-# sample usage
+def read_json(filename):
+    name = 'resources/{0}.json'.format(filename)
+    f = open(name, 'r', encoding='utf-8')
+    return f.read()
 
-# q="CrossFit"
+def save_to_mongo(data, mongo_db, mongo_db_coll, **mongo_conn_kw):
+    # Connects to the MongoDB server running on
+    # localhost:27017 by default
+    client = pymongo.MongoClient(**mongo_conn_kw)
+    # Get a reference to a particular database
+    db = client[mongo_db]
+    # Reference a particular collection in the database
+    coll = db[mongo_db_coll]
+    # Perform a bulk insert and return the IDs
+    return coll.insert(data)
+
+def load_from_mongo(mongo_db, mongo_db_coll, return_cursor=False,
+    criteria=None, projection=None, **mongo_conn_kw):
+
+    client = pymongo.MongoClient(**mongo_conn_kw)
+    db = client[mongo_db]
+    coll = db[mongo_db_coll]
+    if criteria is None:
+        criteria = {}
+    if projection is None:
+        cursor = coll.find(criteria)
+    else:
+        cursor = coll.find(criteria, projection)
+    # Returning a cursor is recommended for large amounts of data
+    if return_cursor:
+        return cursor
+    else:
+        return [ item for item in cursor ]
+
+def crawl_friends(twitter_api, screen_name, limit=10000, depth=2):
+    # in storage
+    seed_id = str(twitter_api.users.show(screen_name=screen_name)['id'])
+
+    next_queue = get_friends_followers_ids(twitter_api, user_id=seed_id, friends_limit=limit, followers_limit=0)
+    # Store a seed_id => _follower_ids mapping in MongoDB
+    save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'followers_crawl','{0}_follower_ids'.format(seed_id))
+    d = 1
+    while d < depth:
+        d += 1
+        (queue, next_queue) = (next_queue, [])
+        for fid in queue:
+            follower_ids = get_friends_followers_ids(twitter_api, user_id=fid,friends_limit=limit,followers_limit=0)
+            # Store a fid => follower_ids mapping in MongoDB
+            save_to_mongo({'followers' : [ _id for _id in next_queue ]},'followers_crawl', '{0}_follower_ids'.format(fid))
+            next_queue += follower_ids
+
+# function that stores users timeline in timelines collection
+# argument is user_id
+def get_users_friends_from_db(user_id):
+    friends_ids = load_from_mongo('followers_crawl', '{0}_follower_ids'.format(user_id))
+    return friends_ids
+
+def save_users_timelines(twitter_api, users_ids):
+
+    for str_id in users_ids:
+        id = int(str_id)
+
+        timeline = harvest_user_timeline(twitter_api, user_id=id)
+        results = {'timeline': timeline, 'user_id': id}
+        # print(json.dumps(results, indent=1))
+        save_to_mongo(results,'followers_crawl','followers_timelines')
 
 
-# statuses = twitter_search(twitter_api, q)
+
+
+# Sample usage
+screen_name = "KolevD"
+my_user_id='101215787'
+res = get_users_friends_from_db(my_user_id)
+
+save_users_timelines(twitter_api, res[0]['followers'])
+
+# print(res[0]['followers'])
+# for stringce in res[0]['followers']:
+#     print(type(stringce))
+
+# crawl_friends(twitter_api, screen_name, depth=2, limit=10)
+
+
+
+
+
+#Usage
+# q='CrossFit'
 #
-# (screen_names, hashtags, urls, media, symbols) = extract_twitter_entities(statuses)
+# results = twitter_search(twitter_api, q, max_results=10)
+#
+# save_json(q, results)
+# rez = read_json(q)
+#
+# print(pp(rez))
 
-#od site gi printame prvite pet
-# print(pp(screen_names[0:5]))
-# print(pp(hashtags[0:5]))
-# print(pp(urls[0:5]))
-# print(pp(media[0:5]))
-# print(pp(symbols[0:5]))
+# auth_twitter_search = partial(twitter_search, twitter_api)
 
-friends_ids = get_friends_followers_ids(twitter_api,
-                                        screen_name="KolevD",
-                                        friends_limit=10,
-                                        followers_limit=10)
-
-first_friend = friends_ids[0]
-
-# print(friends_ids)
-
-tweets = harvest_user_timeline(twitter_api, user_id=first_friend
-                               , max_results=200)
-print(pp(tweets))
+# friends_ids = get_friends_followers_ids(twitter_api,
+#                                         screen_name="KolevD",
+#                                         friends_limit=10,
+#                                         followers_limit=10)
+#
+# first_friend = friends_ids[0]
+#
+# # print(friends_ids)
+#
+# tweets = harvest_user_timeline(twitter_api, user_id=first_friend
+#                                , max_results=200)
+# print(pp(tweets))
 
