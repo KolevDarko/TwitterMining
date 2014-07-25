@@ -2,11 +2,10 @@ __author__ = 'Darko'
 
 import sys
 import time
-from urllib.error import URLError
-from http.client import BadStatusLine
+from urllib2 import URLError
+from httplib import BadStatusLine
 import twitter
 import json
-import io
 from functools import partial
 from sys import maxsize
 import pymongo
@@ -264,13 +263,13 @@ def load_from_mongo(mongo_db, mongo_db_coll, return_cursor=False,
     else:
         return [ item for item in cursor ]
 
-def crawl_friends(twitter_api, screen_name, limit=10000, depth=2):
+def crawl_friends(twitter_api, screen_name, limit=1000, depth=2):
     # in storage
     seed_id = str(twitter_api.users.show(screen_name=screen_name)['id'])
 
     next_queue = get_friends_followers_ids(twitter_api, user_id=seed_id, friends_limit=limit, followers_limit=0)
     # Store a seed_id => _follower_ids mapping in MongoDB
-    save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'followers_crawl','{0}_follower_ids'.format(seed_id))
+    save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'users_crawl', 'users_ids'.format(seed_id))
     d = 1
     while d < depth:
         d += 1
@@ -278,7 +277,7 @@ def crawl_friends(twitter_api, screen_name, limit=10000, depth=2):
         for fid in queue:
             follower_ids = get_friends_followers_ids(twitter_api, user_id=fid,friends_limit=limit,followers_limit=0)
             # Store a fid => follower_ids mapping in MongoDB
-            save_to_mongo({'followers' : [ _id for _id in next_queue ]},'followers_crawl', '{0}_follower_ids'.format(fid))
+            save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'users_crawl', 'users_ids')
             next_queue += follower_ids
 
 # function that stores users timeline in timelines collection
@@ -295,18 +294,21 @@ def save_users_timelines(twitter_api, users_ids):
         timeline = harvest_user_timeline(twitter_api, user_id=id)
         results = {'timeline': timeline, 'user_id': id}
         # print(json.dumps(results, indent=1))
-        save_to_mongo(results,'followers_crawl','followers_timelines')
+        save_to_mongo(results, 'followers_crawl', 'followers_timelines')
 
 
 
 
 # Sample usage
 screen_name = "KolevD"
-my_user_id='101215787'
-res = get_users_friends_from_db(my_user_id)
 
-save_users_timelines(twitter_api, res[0]['followers'])
+crawl_friends(twitter_api, screen_name)
 
+# my_user_id='101215787'
+# res = get_users_friends_from_db(my_user_id)
+
+# save_users_timelines(twitter_api, res[0]['followers'])
+#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 # print(res[0]['followers'])
 # for stringce in res[0]['followers']:
 #     print(type(stringce))
