@@ -9,6 +9,9 @@ import json
 from functools import partial
 from sys import maxsize
 import pymongo
+import re
+
+
 
 
 
@@ -282,9 +285,65 @@ def crawl_friends(twitter_api, screen_name, limit=1000, depth=2):
 
 # function that stores users timeline in timelines collection
 # argument is user_id
-def get_users_friends_from_db(user_id):
-    friends_ids = load_from_mongo('followers_crawl', '{0}_follower_ids'.format(user_id))
+def get_users_friends_from_db():
+    friends_ids = load_from_mongo('users_crawl', 'users_ids')
     return friends_ids
+
+def get_users_timeline_from_db():
+    uslov = { 'timeline': { '$not': { '$size': 0 } } }
+    return load_from_mongo('users_crawl', 'users_timelines', True, criteria=uslov)
+
+def get_urls_from_tweet(tweet):
+    urls = []
+    indices = []
+    text = tweet['text']
+    for url in tweet['entities']['urls']:
+        indices = url['indices']
+        urls.insert(0, text[indices[0]: indices[1]])
+    return urls, indices
+
+def remove_urls(text):
+    urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    original = text
+    for url in urls:
+        pos = original.find(url)
+        res = original[0:pos] + original[pos+len(url):]
+        original = res
+    return original
+
+
+def combine_users_tweets():
+    timelines_cursor = get_users_timeline_from_db()
+    i=0
+    for tl in timelines_cursor:
+        i += 1
+        if i == 20:
+            return
+        j=0
+        for tweet in tl['timeline']:
+            j+=1
+            if j == 2:
+                break
+            urls = []
+            first_text = tweet['text']
+            lean_text = first_text
+            urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', first_text)
+
+            # if tweet['entities']['urls']:
+            #     urls = get_urls_from_tweet(tweet)
+            #     print(pp(urls))
+            #     lean_text = first_text[0: urls[1][0]] + first_text[urls[1][1]:]
+            # else:
+            #     lean_text = first_text
+            # first_text = tl['timeline'][0]['text']
+
+            lean_text.encode('ascii', 'ignore')
+            lean_text = remove_urls(lean_text)
+            print("The first text from timeline {0} is : ".format(i))
+            print(pp(urls))
+            print(lean_text)
+
+
 
 def save_users_timelines(twitter_api, users_ids):
 
@@ -294,15 +353,40 @@ def save_users_timelines(twitter_api, users_ids):
         timeline = harvest_user_timeline(twitter_api, user_id=id)
         results = {'timeline': timeline, 'user_id': id}
         # print(json.dumps(results, indent=1))
-        save_to_mongo(results, 'followers_crawl', 'followers_timelines')
+        save_to_mongo(results, 'users_crawl', 'users_timelines')
 
+def save_single_user_timeline(twitter_api, user_id):
+    id = int(user_id)
+    timeline = harvest_user_timeline(twitter_api, user_id=id)
+    results = {'timeline': timeline, 'user_id': id}
+    save_to_mongo(results, 'users_crawl', 'users_timelines')
 
-
+# TODO: create function for transforming array of tweets into one file
+# then from file into field
 
 # Sample usage
-screen_name = "KolevD"
+# screen_name = "KolevD"
 
-crawl_friends(twitter_api, screen_name)
+# crawl_friends(twitter_api, screen_name)
+
+# all_users = get_users_friends_from_db()
+# i=0
+#
+# for user in all_users:
+#     for follower in user['followers']:
+#         i+=1
+#         # print("{0}: {1}".format(i, follower))
+#         if(i>5000):
+#             break
+#         save_single_user_timeline(twitter_api, follower)
+
+
+def main():
+    print("tester")
+    combine_users_tweets()
+
+if __name__ == "__main__":
+    main()
 
 # my_user_id='101215787'
 # res = get_users_friends_from_db(my_user_id)
