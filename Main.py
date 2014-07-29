@@ -10,6 +10,8 @@ from functools import partial
 from sys import maxsize
 import pymongo
 import re
+import codecs
+
 
 
 
@@ -232,6 +234,14 @@ def save_json(filename, data):
     f.write((json.dumps(data, ensure_ascii=False)))
     return
 
+def append_to_file(filename, data):
+    name = 'resources/{0}.txt'.format(filename)
+    with codecs.open(name, "a+", encoding="utf-8") as f:
+        f.write(data + "\n")
+    return
+
+
+
 def read_json(filename):
     name = 'resources/{0}.json'.format(filename)
     f = open(name, 'r', encoding='utf-8')
@@ -302,8 +312,8 @@ def get_urls_from_tweet(tweet):
         urls.insert(0, text[indices[0]: indices[1]])
     return urls, indices
 
-def remove_urls(text):
-    urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+def remove_entities(text, pattern):
+    urls = re.findall(text, pattern)
     original = text
     for url in urls:
         pos = original.find(url)
@@ -317,31 +327,29 @@ def combine_users_tweets():
     i=0
     for tl in timelines_cursor:
         i += 1
-        if i == 20:
-            return
-        j=0
+        if i < 10:
+            continue
+        append_to_file("temp", str(tl['user_id']))
         for tweet in tl['timeline']:
-            j+=1
-            if j == 2:
-                break
+            # j+=1
+            # if j == 2:
+            #     break
             urls = []
             first_text = tweet['text']
             lean_text = first_text
-            urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', first_text)
+            # urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+            # users_pattern = '(?<=^|(?<=[^a-zA-Z0-9-_\.]))@([A-Za-z]+[A-Za-z0-9]+)'
 
-            # if tweet['entities']['urls']:
-            #     urls = get_urls_from_tweet(tweet)
-            #     print(pp(urls))
-            #     lean_text = first_text[0: urls[1][0]] + first_text[urls[1][1]:]
-            # else:
-            #     lean_text = first_text
-            # first_text = tl['timeline'][0]['text']
+            urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', first_text)
+            users = re.findall('(?<=^|(?<=[^a-zA-Z0-9-_\.]))@([A-Za-z]+[A-Za-z0-9]+)', first_text)
+
 
             lean_text.encode('ascii', 'ignore')
-            lean_text = remove_urls(lean_text)
-            print("The first text from timeline {0} is : ".format(i))
-            print(pp(urls))
-            print(lean_text)
+            lean_text = remove_entities(lean_text, 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+            lean_text = remove_entities(lean_text, '(?<=^|(?<=[^a-zA-Z0-9-_\.]))@([A-Za-z]+[A-Za-z0-9]+)')
+            append_to_file("temp", lean_text)
+            append_to_file("users_metions", pp(users))
+        return
 
 
 
@@ -362,28 +370,16 @@ def save_single_user_timeline(twitter_api, user_id):
     save_to_mongo(results, 'users_crawl', 'users_timelines')
 
 # TODO: create function for transforming array of tweets into one file
+# TODO: proveri zosto ne gi fakja site urla vo listata
 # then from file into field
-
-# Sample usage
-# screen_name = "KolevD"
-
-# crawl_friends(twitter_api, screen_name)
-
-# all_users = get_users_friends_from_db()
-# i=0
-#
-# for user in all_users:
-#     for follower in user['followers']:
-#         i+=1
-#         # print("{0}: {1}".format(i, follower))
-#         if(i>5000):
-#             break
-#         save_single_user_timeline(twitter_api, follower)
 
 
 def main():
     print("tester")
+    # append_to_file("temper", "Darko the awesomest")
+    # append_to_file("temper", "As always")
     combine_users_tweets()
+
 
 if __name__ == "__main__":
     main()
