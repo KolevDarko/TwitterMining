@@ -11,6 +11,7 @@ from sys import maxsize
 import pymongo
 import re
 import codecs
+import TextProcesor
 
 
 
@@ -234,6 +235,14 @@ def save_json(filename, data):
     f.write((json.dumps(data, ensure_ascii=False)))
     return
 
+def append_arr_to_file(filename, data):
+    name = 'resources/{0}.txt'.format(filename)
+    with codecs.open(name, "a+", encoding="utf-8") as f:
+        for w in data:
+            f.write(w + " ")
+        f.write("\n")
+    return
+
 def append_to_file(filename, data):
     name = 'resources/{0}.txt'.format(filename)
     with codecs.open(name, "a+", encoding="utf-8") as f:
@@ -246,6 +255,10 @@ def read_json(filename):
     name = 'resources/{0}.json'.format(filename)
     f = open(name, 'r', encoding='utf-8')
     return f.read()
+
+# TODO: create this function
+# def insertFileIntoMongo(filename):
+#     save_to_mongo
 
 def save_to_mongo(data, mongo_db, mongo_db_coll, **mongo_conn_kw):
     # Connects to the MongoDB server running on
@@ -313,17 +326,18 @@ def get_urls_from_tweet(tweet):
     return urls, indices
 
 def remove_entities(text, pattern):
-    urls = re.findall(text, pattern)
+    entities = re.findall(pattern, text)
     original = text
-    for url in urls:
+    for url in entities:
         pos = original.find(url)
-        res = original[0:pos] + original[pos+len(url):]
+        res = original[0:pos-1] + original[pos+len(url):]
         original = res
     return original
 
 
 def combine_users_tweets():
     timelines_cursor = get_users_timeline_from_db()
+    urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     i=0
     for tl in timelines_cursor:
         i += 1
@@ -331,24 +345,21 @@ def combine_users_tweets():
             continue
         append_to_file("temp", str(tl['user_id']))
         for tweet in tl['timeline']:
-            # j+=1
-            # if j == 2:
-            #     break
-            urls = []
             first_text = tweet['text']
             lean_text = first_text
-            # urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-            # users_pattern = '(?<=^|(?<=[^a-zA-Z0-9-_\.]))@([A-Za-z]+[A-Za-z0-9]+)'
-
-            urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', first_text)
-            users = re.findall('(?<=^|(?<=[^a-zA-Z0-9-_\.]))@([A-Za-z]+[A-Za-z0-9]+)', first_text)
-
 
             lean_text.encode('ascii', 'ignore')
-            lean_text = remove_entities(lean_text, 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
-            lean_text = remove_entities(lean_text, '(?<=^|(?<=[^a-zA-Z0-9-_\.]))@([A-Za-z]+[A-Za-z0-9]+)')
-            append_to_file("temp", lean_text)
-            append_to_file("users_metions", pp(users))
+            lean_text = remove_entities(lean_text, urls_pattern)
+            testObj = TextProcesor.TextProcesor()
+            lean_text = testObj.removeSpecialChars(lean_text)
+
+            lean_text_arr = testObj.splitToTokens(lean_text)
+            lean_text_arr = testObj.removeStopwords(lean_text_arr)
+            lean_text_arr = testObj.removeSingles(lean_text_arr)
+
+            append_arr_to_file("temp", lean_text_arr)
+        #     TODO now make a dictionary out of these words
+        #       Todo and figure out how to store them in db
         return
 
 
@@ -370,8 +381,6 @@ def save_single_user_timeline(twitter_api, user_id):
     save_to_mongo(results, 'users_crawl', 'users_timelines')
 
 # TODO: create function for transforming array of tweets into one file
-# TODO: proveri zosto ne gi fakja site urla vo listata
-# then from file into field
 
 
 def main():
