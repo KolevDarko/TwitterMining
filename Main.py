@@ -11,10 +11,12 @@ from sys import maxsize
 import pymongo
 import re
 import codecs
+from gensim import corpora
 import TextProcesor
+import CustomCorpus
+import logging
 
-
-
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 
 
@@ -241,12 +243,14 @@ def append_arr_to_file(filename, data):
         for w in data:
             f.write(w + " ")
         f.write("\n")
+        f.close()
     return
 
 def append_to_file(filename, data):
     name = 'resources/{0}.txt'.format(filename)
     with codecs.open(name, "a+", encoding="utf-8") as f:
         f.write(data + "\n")
+        f.close()
     return
 
 
@@ -316,6 +320,8 @@ def get_users_timeline_from_db():
     uslov = { 'timeline': { '$not': { '$size': 0 } } }
     return load_from_mongo('users_crawl', 'users_timelines', True, criteria=uslov)
 
+
+
 def get_urls_from_tweet(tweet):
     urls = []
     indices = []
@@ -334,34 +340,70 @@ def remove_entities(text, pattern):
         original = res
     return original
 
+def save_timeline_to_file(tl):
+    urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+    for tweet in tl['timeline']:
+        try:
+            first_text = str.lower(str(tweet['text']))
+        except UnicodeEncodeError:
+            first_text = tweet['text']
+
+        lean_text = first_text
+
+        lean_text.encode('ascii', 'ignore')
+        lean_text = remove_entities(lean_text, urls_pattern)
+        testObj = TextProcesor.TextProcesor()
+        lean_text = testObj.removeSpecialChars(lean_text)
+
+        lean_text_arr = testObj.splitToTokens(lean_text)
+        lean_text_arr = testObj.removeStopwords(lean_text_arr)
+        lean_text_arr = testObj.removeSingles(lean_text_arr)
+
+        append_arr_to_file("temp", lean_text_arr)
 
 def combine_users_tweets():
     timelines_cursor = get_users_timeline_from_db()
-    urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     i=0
+    master_dictionary = corpora.Dictionary()
+    documents = []
+    ids = []
+    # gi izminuvame timelines na site mozni korisnici
     for tl in timelines_cursor:
-        i += 1
-        if i < 10:
-            continue
-        append_to_file("temp", str(tl['user_id']))
-        for tweet in tl['timeline']:
-            first_text = tweet['text']
-            lean_text = first_text
+            i+=1
+            # save userid in array
+            userid = tl['user_id']
+            ids.append(userid)
+            # save timeline to temp file
+            delete_content()
+            save_timeline_to_file(tl)
+            # create dictionary from timeline
+            iter_dictionary = CustomCorpus.create_document_from_file()
+            documents.append(iter_dictionary)
+            # TODO can use filter extremes from dictionary class
+            CustomCorpus.add_to_dictionary(master_dictionary)
 
-            lean_text.encode('ascii', 'ignore')
-            lean_text = remove_entities(lean_text, urls_pattern)
-            testObj = TextProcesor.TextProcesor()
-            lean_text = testObj.removeSpecialChars(lean_text)
+            print("Dictionary number {0}".format(i))
+            print(iter_dictionary)
+        #     print("End print first arr of ids:\n")
+        #     print(pp(ids))
+        #     print('_____________Dict Array bellow_')
+        #     print(documents)
+        #     print('______________ Master bellow')
+        #     print(master_dictionary)
+        #     return
+    master_dictionary.save('resources/master_dictionary.dict')
+    print("After saving master, long processing begins")
 
-            lean_text_arr = testObj.splitToTokens(lean_text)
-            lean_text_arr = testObj.removeStopwords(lean_text_arr)
-            lean_text_arr = testObj.removeSingles(lean_text_arr)
+    for idx, doc in enumerate(documents):
+        userid = ids[idx]
+        print("Vectoring {0} dictionary for user {1} ".format(idx, userid))
+        new_vec = master_dictionary.doc2bow(doc)
+        data = {"vector": new_vec, "userid": userid}
+        save_to_mongo(data, "users_crawl", "users_vectors")
 
-            append_arr_to_file("temp", lean_text_arr)
-        #     TODO now make a dictionary out of these words
-        #       Todo and figure out how to store them in db
-        return
 
+        #Todo and figure out how to store them in db
+    return
 
 
 def save_users_timelines(twitter_api, users_ids):
@@ -380,56 +422,36 @@ def save_single_user_timeline(twitter_api, user_id):
     results = {'timeline': timeline, 'user_id': id}
     save_to_mongo(results, 'users_crawl', 'users_timelines')
 
-# TODO: create function for transforming array of tweets into one file
+def delete_content(filename="Temp"):
+    name = 'resources/{0}.txt'.format(filename)
+    with codecs.open(name, "a+", encoding="utf-8") as f:
+        f.seek(0)
+        f.truncate()
+        f.close()
 
+def load_corpus_from_db():
+    corpus_data = load_from_mongo('users_crawl', 'users_vectors', True)
+    i=0
+    corpus = []
+    for doc in corpus_data:
+        i+=1
+        if i<6:
+            document = [(vec[0], vec[1]) for vec in doc['vector']]
+            corpus.append(document)
+        else:
+            break
+
+    print(corpus)
 
 def main():
-    print("tester")
-    # append_to_file("temper", "Darko the awesomest")
-    # append_to_file("temper", "As always")
-    combine_users_tweets()
+    print("Running main")
+    # delete_content()
+    # combine_users_tweets()
+    # This is working now just execute model
+    load_corpus_from_db()
+
 
 
 if __name__ == "__main__":
     main()
-
-# my_user_id='101215787'
-# res = get_users_friends_from_db(my_user_id)
-
-# save_users_timelines(twitter_api, res[0]['followers'])
-#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-# print(res[0]['followers'])
-# for stringce in res[0]['followers']:
-#     print(type(stringce))
-
-# crawl_friends(twitter_api, screen_name, depth=2, limit=10)
-
-
-
-
-
-#Usage
-# q='CrossFit'
-#
-# results = twitter_search(twitter_api, q, max_results=10)
-#
-# save_json(q, results)
-# rez = read_json(q)
-#
-# print(pp(rez))
-
-# auth_twitter_search = partial(twitter_search, twitter_api)
-
-# friends_ids = get_friends_followers_ids(twitter_api,
-#                                         screen_name="KolevD",
-#                                         friends_limit=10,
-#                                         followers_limit=10)
-#
-# first_friend = friends_ids[0]
-#
-# # print(friends_ids)
-#
-# tweets = harvest_user_timeline(twitter_api, user_id=first_friend
-#                                , max_results=200)
-# print(pp(tweets))
 

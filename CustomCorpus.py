@@ -5,6 +5,7 @@ __author__ = 'Darko'
 import json
 from gensim import corpora, models, similarities
 from functools import partial
+import codecs
 
 pp = partial(json.dumps, indent=1)
 
@@ -33,10 +34,34 @@ def createCorpus():
     new_vec = dictionary.doc2bow(new_doc.lower().split())
     print(new_vec)
 
+def file_to_doc(filename="Temp"):
+    name = 'resources/{0}.txt'.format(filename)
+    with codecs.open(name, "r", encoding="utf-8") as f:
+        text = f.read()
+        text_arr = text.split()
+        list_arr = []
+        list_arr.append(text_arr)
+        return list_arr
+
+def create_document_from_file(filename="Temp"):
+    docs = file_to_doc(filename)[0]
+    return docs
+    # return dictionary
+
+
+
+def add_to_dictionary(dictionary=None, filename="Temp"):
+    docs = file_to_doc(filename)
+    dictionary.add_documents(docs)
+    return dictionary
+
+def dictionary_to_vector(dictionary=None):
+    return dictionary.token2id
 
 def main():
     print("Corpus")
-    createCorpus()
+    # createCorpus()
+    # create_dictionary_from_file("Temp")
 
 if __name__ == "__main__":
     main()
