@@ -26,7 +26,6 @@ class TextProcesor:
     def removeSingles(self, text_arr):
         result = []
         for token in text_arr:
-            if len(token) > 1 and str.lower(str(token)) != "rt":
-                result.append(token)
+            if len(token) > 1 and str.lower(str(token)) != "rt" and isinstance(token, basestring):
+                result.append(str(token))
         return result
-
