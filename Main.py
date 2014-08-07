@@ -11,13 +11,13 @@ from sys import maxsize
 import pymongo
 import re
 import codecs
-from gensim import corpora
 import TextProcesor
-import CustomCorpus
+from gensim import corpora, models, similarities
+import DataOperations
+import MyCorpus
 import logging
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
-
 
 
 def oauth_login():
@@ -231,67 +231,6 @@ def harvest_user_timeline(twitter_api, screen_name=None, user_id=None, max_resul
 
 
 #Saving json data in text files
-def save_json(filename, data):
-    name = 'resources/{0}.json'.format(filename)
-    f = open(name, 'w+', encoding='utf-8')
-    f.write((json.dumps(data, ensure_ascii=False)))
-    return
-
-def append_arr_to_file(filename, data):
-    name = 'resources/{0}.txt'.format(filename)
-    with codecs.open(name, "a+", encoding="utf-8") as f:
-        for w in data:
-            f.write(w + " ")
-        f.write("\n")
-        f.close()
-    return
-
-def append_to_file(filename, data):
-    name = 'resources/{0}.txt'.format(filename)
-    with codecs.open(name, "a+", encoding="utf-8") as f:
-        f.write(data + "\n")
-        f.close()
-    return
-
-
-
-def read_json(filename):
-    name = 'resources/{0}.json'.format(filename)
-    f = open(name, 'r', encoding='utf-8')
-    return f.read()
-
-# TODO: create this function
-# def insertFileIntoMongo(filename):
-#     save_to_mongo
-
-def save_to_mongo(data, mongo_db, mongo_db_coll, **mongo_conn_kw):
-    # Connects to the MongoDB server running on
-    # localhost:27017 by default
-    client = pymongo.MongoClient(**mongo_conn_kw)
-    # Get a reference to a particular database
-    db = client[mongo_db]
-    # Reference a particular collection in the database
-    coll = db[mongo_db_coll]
-    # Perform a bulk insert and return the IDs
-    return coll.insert(data)
-
-def load_from_mongo(mongo_db, mongo_db_coll, return_cursor=False,
-    criteria=None, projection=None, **mongo_conn_kw):
-
-    client = pymongo.MongoClient(**mongo_conn_kw)
-    db = client[mongo_db]
-    coll = db[mongo_db_coll]
-    if criteria is None:
-        criteria = {}
-    if projection is None:
-        cursor = coll.find(criteria)
-    else:
-        cursor = coll.find(criteria, projection)
-    # Returning a cursor is recommended for large amounts of data
-    if return_cursor:
-        return cursor
-    else:
-        return [ item for item in cursor ]
 
 def crawl_friends(twitter_api, screen_name, limit=1000, depth=2):
     # in storage
@@ -299,7 +238,7 @@ def crawl_friends(twitter_api, screen_name, limit=1000, depth=2):
 
     next_queue = get_friends_followers_ids(twitter_api, user_id=seed_id, friends_limit=limit, followers_limit=0)
     # Store a seed_id => _follower_ids mapping in MongoDB
-    save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'users_crawl', 'users_ids'.format(seed_id))
+    DataOperations.save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'users_crawl', 'users_ids'.format(seed_id))
     d = 1
     while d < depth:
         d += 1
@@ -307,20 +246,18 @@ def crawl_friends(twitter_api, screen_name, limit=1000, depth=2):
         for fid in queue:
             follower_ids = get_friends_followers_ids(twitter_api, user_id=fid,friends_limit=limit,followers_limit=0)
             # Store a fid => follower_ids mapping in MongoDB
-            save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'users_crawl', 'users_ids')
+            DataOperations.save_to_mongo({'followers' : [ _id for _id in next_queue ]}, 'users_crawl', 'users_ids')
             next_queue += follower_ids
 
 # function that stores users timeline in timelines collection
 # argument is user_id
 def get_users_friends_from_db():
-    friends_ids = load_from_mongo('users_crawl', 'users_ids')
+    friends_ids = DataOperations.load_from_mongo('users_crawl', 'users_ids')
     return friends_ids
 
 def get_users_timeline_from_db():
     uslov = { 'timeline': { '$not': { '$size': 0 } } }
-    return load_from_mongo('users_crawl', 'users_timelines', True, criteria=uslov)
-
-
+    return DataOperations.load_from_mongo('users_crawl', 'users_timelines', True, criteria=uslov)
 
 def get_urls_from_tweet(tweet):
     urls = []
@@ -340,71 +277,40 @@ def remove_entities(text, pattern):
         original = res
     return original
 
-def save_timeline_to_file(tl):
-    urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-    for tweet in tl['timeline']:
-        try:
-            first_text = str.lower(str(tweet['text']))
-        except UnicodeEncodeError:
-            first_text = tweet['text']
-
-        lean_text = first_text
-
-        lean_text.encode('ascii', 'ignore')
-        lean_text = remove_entities(lean_text, urls_pattern)
-        testObj = TextProcesor.TextProcesor()
-        lean_text = testObj.removeSpecialChars(lean_text)
-
-        lean_text_arr = testObj.splitToTokens(lean_text)
-        lean_text_arr = testObj.removeStopwords(lean_text_arr)
-        lean_text_arr = testObj.removeSingles(lean_text_arr)
-
-        append_arr_to_file("temp", lean_text_arr)
 
 def combine_users_tweets():
     timelines_cursor = get_users_timeline_from_db()
+    urls_pattern = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     i=0
-    master_dictionary = corpora.Dictionary()
-    documents = []
-    ids = []
-    # gi izminuvame timelines na site mozni korisnici
     for tl in timelines_cursor:
-            i+=1
-            # save userid in array
-            userid = tl['user_id']
-            ids.append(userid)
-            # save timeline to temp file
-            delete_content()
-            save_timeline_to_file(tl)
-            # create dictionary from timeline
-            iter_dictionary = CustomCorpus.create_document_from_file()
-            documents.append(iter_dictionary)
-            # TODO can use filter extremes from dictionary class
-            CustomCorpus.add_to_dictionary(master_dictionary)
+        i += 1
+        if i < 10:
+            continue
+        DataOperations.append_to_file("temp", str(tl['user_id']))
+        for tweet in tl['timeline']:
+            first_text = tweet['text']
+            lean_text = first_text
 
-            print("Dictionary number {0}".format(i))
-            print(iter_dictionary)
-        #     print("End print first arr of ids:\n")
-        #     print(pp(ids))
-        #     print('_____________Dict Array bellow_')
-        #     print(documents)
-        #     print('______________ Master bellow')
-        #     print(master_dictionary)
-        #     return
-    master_dictionary.save('resources/master_dictionary.dict')
-    print("After saving master, long processing begins")
+            lean_text.encode('ascii', 'ignore')
+            lean_text = remove_entities(lean_text, urls_pattern)
+            testObj = TextProcesor.TextProcesor()
+            lean_text = testObj.removeSpecialChars(lean_text)
 
-    for idx, doc in enumerate(documents):
-        userid = ids[idx]
-        print("Vectoring {0} dictionary for user {1} ".format(idx, userid))
-        new_vec = master_dictionary.doc2bow(doc)
-        data = {"vector": new_vec, "userid": userid}
-        save_to_mongo(data, "users_crawl", "users_vectors")
+            lean_text_arr = testObj.splitToTokens(lean_text)
+            lean_text_arr = testObj.removeStopwords(lean_text_arr)
+            lean_text_arr = testObj.removeSingles(lean_text_arr)
+            DataOperations.append_arr_to_file("temp", lean_text_arr)
+        return
+        #       Todo and figure out how to store them in db
 
-
-        #Todo and figure out how to store them in db
-    return
-
+def create_dictionary_from_file(filename=None):
+    name = 'resources/{0}.txt'.format(filename)
+    with codecs.open(name, "r", encoding="utf-8") as f:
+        full_text = f.read()
+        texts = full_text.split(" ")
+        double_list = []
+        double_list.append(texts)
+        return corpora.Dictionary(double_list)
 
 def save_users_timelines(twitter_api, users_ids):
 
@@ -414,44 +320,69 @@ def save_users_timelines(twitter_api, users_ids):
         timeline = harvest_user_timeline(twitter_api, user_id=id)
         results = {'timeline': timeline, 'user_id': id}
         # print(json.dumps(results, indent=1))
-        save_to_mongo(results, 'users_crawl', 'users_timelines')
+        DataOperations.save_to_mongo(results, 'users_crawl', 'users_timelines')
 
 def save_single_user_timeline(twitter_api, user_id):
     id = int(user_id)
     timeline = harvest_user_timeline(twitter_api, user_id=id)
     results = {'timeline': timeline, 'user_id': id}
-    save_to_mongo(results, 'users_crawl', 'users_timelines')
+    DataOperations.save_to_mongo(results, 'users_crawl', 'users_timelines')
 
-def delete_content(filename="Temp"):
-    name = 'resources/{0}.txt'.format(filename)
-    with codecs.open(name, "a+", encoding="utf-8") as f:
-        f.seek(0)
-        f.truncate()
-        f.close()
+# TODO: create function for transforming array of tweets into one file
 
-def load_corpus_from_db():
-    corpus_data = load_from_mongo('users_crawl', 'users_vectors', True)
-    i=0
-    corpus = []
-    for doc in corpus_data:
-        i+=1
-        if i<6:
-            document = [(vec[0], vec[1]) for vec in doc['vector']]
-            corpus.append(document)
-        else:
-            break
-
-    print(corpus)
 
 def main():
-    print("Running main")
-    # delete_content()
+    print("tester main")
+    # append_to_file("temper", "Darko the awesomest")
+    # append_to_file("temper", "As always")
     # combine_users_tweets()
-    # This is working now just execute model
-    load_corpus_from_db()
-
-
+    # print(create_dictionary_from_file("temp"))
+    my_corpus = MyCorpus.MyCorpus()
+    my_dictionary = corpora.Dictionary.load(fname='resources/master_dictionary.dict')
+    my_lda = models.ldamodel.LdaModel(my_corpus, id2word=my_dictionary, num_topics=100,  update_every=1, chunksize=10000, passes=1)
+    my_lda.print_topics(26)
+    my_lda.save('resources/LdaModel')
 
 if __name__ == "__main__":
     main()
+
+# my_user_id='101215787'
+# res = get_users_friends_from_db(my_user_id)
+
+# save_users_timelines(twitter_api, res[0]['followers'])
+#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# print(res[0]['followers'])
+# for stringce in res[0]['followers']:
+#     print(type(stringce))
+
+# crawl_friends(twitter_api, screen_name, depth=2, limit=10)
+
+
+
+
+
+#Usage
+# q='CrossFit'
+#
+# results = twitter_search(twitter_api, q, max_results=10)
+#
+# save_json(q, results)
+# rez = read_json(q)
+#
+# print(pp(rez))
+
+# auth_twitter_search = partial(twitter_search, twitter_api)
+
+# friends_ids = get_friends_followers_ids(twitter_api,
+#                                         screen_name="KolevD",
+#                                         friends_limit=10,
+#                                         followers_limit=10)
+#
+# first_friend = friends_ids[0]
+#
+# # print(friends_ids)
+#
+# tweets = harvest_user_timeline(twitter_api, user_id=first_friend
+#                                , max_results=200)
+# print(pp(tweets))
 
