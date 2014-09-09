@@ -337,11 +337,32 @@ def main():
     # append_to_file("temper", "As always")
     # combine_users_tweets()
     # print(create_dictionary_from_file("temp"))
+
+
+
     my_corpus = MyCorpus.MyCorpus()
-    my_dictionary = corpora.Dictionary.load(fname='resources/master_dictionary.dict')
-    my_lda = models.ldamodel.LdaModel(my_corpus, id2word=my_dictionary, num_topics=100,  update_every=1, chunksize=10000, passes=1)
-    my_lda.print_topics(26)
-    my_lda.save('resources/LdaModel')
+
+    my_dictionary = corpora.Dictionary.load(fname='resources/master_dictionary_filtered.dict')
+
+
+    # my_dictionary.filter_extremes(no_below=10)
+    # my_dictionary.compactify()
+    # my_dictionary.save('resources/master_dictionary2.dict')
+    #
+    # my_dictionary = corpora.Dictionary.load(fname='resources/master_dictionary.dict')
+    # my_dictionary.filter_extremes(no_below=10)
+    # my_dictionary.save('resources/master_dictionary_filtered.dict')
+
+    # to execute
+    my_lda = models.ldamodel.LdaModel(my_corpus, id2word=my_dictionary, num_topics=100,  update_every=1, chunksize=100, passes=20)
+    print 'AAAAAALLLLL DONE'
+    my_lda.print_topics(20)
+    my_lda.save('resources/LdaModel2')
+
+
+    # new_m = models.LdaModel.load('resources/LdaModel')
+    # new_m.print_topics(10)
+
 
 if __name__ == "__main__":
     main()

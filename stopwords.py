@@ -39,3 +39,5 @@ english_stopwords = ['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves'
  'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor',
 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just',
  'don', 'should', 'now']
+you, we, re others
+it
